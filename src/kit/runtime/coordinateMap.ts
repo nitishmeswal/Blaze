@@ -162,12 +162,12 @@ function applyEase(t: number, ease: Waypoint["easing"]): number {
       return t < 0.5 ? 16 * t ** 5 : 1 - Math.pow(-2 * t + 2, 5) / 2;
     case "back.in": {
       const c1 = 1.70158;
-      return c1 * t * t * t - (c1 - 1) * t * t * t;
+      return (c1 + 1) * t * t * t - c1 * t * t;
     }
     case "back.out": {
       const c1 = 1.70158;
       const f = t - 1;
-      return 1 + c1 * f * f * f + (c1 - 1) * f * f;
+      return 1 + (c1 + 1) * f * f * f + c1 * f * f;
     }
     case "back.inOut": {
       const c2 = 1.70158 * 1.525;

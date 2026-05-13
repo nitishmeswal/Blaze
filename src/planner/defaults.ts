@@ -70,12 +70,26 @@ export const PATH_COLORS = [
   "#f472b6",
 ];
 
-export const EMPTY_MAP: CoordinateMap = {
-  version: 1,
-  name: "Untitled Map",
-  viewports: DEFAULT_VIEWPORTS,
-  sections: [],
-  paths: [],
-  markers: [],
-  modelDefaults: DEFAULT_MODEL_DEFAULTS,
-};
+/**
+ * Returns a fresh, deeply-isolated empty map. Always call this instead of
+ * referencing a module-level constant — sharing a single object across
+ * `reset()` calls risks state leakage if any consumer ever mutates a nested
+ * field in-place (the store does immutable updates today but the runtime,
+ * tests, or future consumers may not).
+ */
+export function createEmptyMap(): CoordinateMap {
+  return {
+    version: 1,
+    name: "Untitled Map",
+    viewports: DEFAULT_VIEWPORTS.map((v) => ({ ...v })),
+    sections: [],
+    paths: [],
+    markers: [],
+    modelDefaults: { ...DEFAULT_MODEL_DEFAULTS },
+  };
+}
+
+/** @deprecated Use `createEmptyMap()` — the previous shared singleton leaked
+ *  references to `DEFAULT_VIEWPORTS` / `DEFAULT_MODEL_DEFAULTS`. Kept as a
+ *  factory for backwards compatibility. */
+export const EMPTY_MAP: CoordinateMap = createEmptyMap();

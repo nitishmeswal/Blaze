@@ -76,6 +76,27 @@ export function CoordinateMapPlayer({
     };
   }, [map, width, pixelsPerUnit]);
 
+  // Refs that always point at the latest values so the ScrollTrigger
+  // callback never closes over stale state. Markers, viewport id and
+  // compiled paths can all change while the trigger is active (e.g. the
+  // author edits the map at runtime in a preview) and we want the next
+  // tick to see the new values without recreating the trigger.
+  const pathsRef = useRef(compiledPaths);
+  const markersRef = useRef(map.markers);
+  const viewportIdRef = useRef(viewport.id);
+  const lastFiredRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    pathsRef.current = compiledPaths;
+  }, [compiledPaths]);
+  useEffect(() => {
+    markersRef.current = map.markers;
+  }, [map.markers]);
+  useEffect(() => {
+    viewportIdRef.current = viewport.id;
+    lastFiredRef.current.clear();
+  }, [viewport.id]);
+
   // Drive the animation off ScrollTrigger.
   useEffect(() => {
     if (!wrapperRef.current) return;
@@ -89,7 +110,7 @@ export function CoordinateMapPlayer({
         if (!group) return;
         // For now we play the first compiled path. Future versions may
         // composite multiple paths (e.g. one per axis).
-        const path = compiledPaths[0];
+        const path = pathsRef.current[0];
         if (!path) return;
         const point = interpolateAtProgress(path, progress);
         if (!point) return;
@@ -107,21 +128,25 @@ export function CoordinateMapPlayer({
         });
 
         // Apply marker actions in a simple manner.
-        for (const m of map.markers.filter(
-          (x) => x.viewportId === viewport.id
-        )) {
+        const currentViewportId = viewportIdRef.current;
+        for (const m of markersRef.current) {
+          if (m.viewportId !== currentViewportId) continue;
           if (!m.action) continue;
           // Fire once when progress crosses the marker.
-          // (Lightweight implementation; the LLM-generated landing-page
-          // code is expected to supersede this with proper timelines.)
-          if (Math.abs(progress - m.scrollProgress) < 0.005) {
+          if (
+            Math.abs(progress - m.scrollProgress) < 0.005 &&
+            !lastFiredRef.current.has(m.id)
+          ) {
+            lastFiredRef.current.add(m.id);
             applyMarkerAction(m.action);
+          } else if (Math.abs(progress - m.scrollProgress) >= 0.02) {
+            lastFiredRef.current.delete(m.id);
           }
         }
       },
     });
     return () => trigger.kill();
-  }, [compiledPaths, map.markers, viewport.id]);
+  }, []);
 
   return (
     <div ref={wrapperRef} className={`relative w-full ${className ?? ""}`}>
