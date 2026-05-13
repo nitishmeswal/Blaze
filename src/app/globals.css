@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: var(--font-sans);
+}
+
+html,
+body {
+  background: #0a0a0f;
+  color: #e8e8ef;
+  -webkit-font-smoothing: antialiased;
+  scroll-behavior: smooth;
+}
+
+html.smooth-scroll,
+html.smooth-scroll body {
+  scroll-behavior: auto;
+}
+
+body.no-scroll {
+  overflow: hidden;
+}
+
+::selection {
+  background: #ff5a1f;
+  color: #0a0a0f;
+}
+
+@layer utilities {
+  .flex-center { @apply flex items-center justify-center; }
+  .col-center  { @apply flex flex-col items-center justify-center; }
+  .abs-center  { @apply absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2; }
+  .text-balance { text-wrap: balance; }
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #1f1f2c transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: #1f1f2c; border-radius: 4px; }
+  .grid-bg {
+    background-image:
+      linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+}
