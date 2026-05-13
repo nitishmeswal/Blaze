@@ -146,7 +146,14 @@ export function CoordinateMapPlayer({
       },
     });
     return () => trigger.kill();
-  }, []);
+    // Recreate the trigger whenever the scrollable page height changes
+    // (viewport switch, section resize, sections added/removed). GSAP
+    // caches start/end pixel positions at create-time and otherwise only
+    // recomputes on a window resize; without this, self.progress would
+    // report stale 0..1 values relative to the previous layout. Per-frame
+    // data (paths, markers, viewport id) still flows through the refs
+    // declared above so marker edits don't churn the trigger.
+  }, [pageHeight]);
 
   return (
     <div ref={wrapperRef} className={`relative w-full ${className ?? ""}`}>
