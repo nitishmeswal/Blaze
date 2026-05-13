@@ -9,7 +9,7 @@
  * — and writes to — this store.
  */
 import { create } from "zustand";
-import { EMPTY_MAP, PATH_COLORS, DEFAULT_MODEL_DEFAULTS } from "./defaults";
+import { createEmptyMap, PATH_COLORS, DEFAULT_MODEL_DEFAULTS } from "./defaults";
 import type {
   CoordinateMap,
   Marker,
@@ -74,7 +74,7 @@ export type PlannerState = {
 };
 
 export const usePlannerStore = create<PlannerState>((set, get) => ({
-  map: EMPTY_MAP,
+  map: createEmptyMap(),
   currentViewportId: "desktop",
   tool: "select",
   draftPathId: null,
@@ -330,7 +330,9 @@ export const usePlannerStore = create<PlannerState>((set, get) => ({
   loadMap(map) {
     const merged: CoordinateMap = {
       ...map,
-      modelDefaults: map.modelDefaults ?? DEFAULT_MODEL_DEFAULTS,
+      modelDefaults: map.modelDefaults
+        ? { ...map.modelDefaults }
+        : { ...DEFAULT_MODEL_DEFAULTS },
     };
     set({
       map: merged,
@@ -342,7 +344,7 @@ export const usePlannerStore = create<PlannerState>((set, get) => ({
   },
   reset() {
     set({
-      map: EMPTY_MAP,
+      map: createEmptyMap(),
       currentViewportId: "desktop",
       tool: "select",
       draftPathId: null,
