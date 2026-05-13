@@ -8,8 +8,11 @@
  * Pass a custom material via the `material` prop or supply per-mesh-name
  * material overrides via `materialOverrides`.
  */
+import { useMemo } from "react";
 import { useGLTF } from "@react-three/drei";
 import type { Material } from "three";
+import type { Object3D } from "three";
+import { SkeletonUtils } from "three-stdlib";
 
 export type GltfModelProps = {
   url: string;
@@ -27,18 +30,27 @@ export function GltfModel({
   material,
 }: GltfModelProps) {
   const { scene } = useGLTF(url);
-  if (material) {
-    scene.traverse((child) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if ((child as any).isMesh) {
+  // Clone the drei-cached scene so per-instance material overrides do not
+  // leak back into the shared singleton.
+  const cloned = useMemo<Object3D>(
+    () => SkeletonUtils.clone(scene),
+    [scene]
+  );
+  const sceneWithMaterial = useMemo(() => {
+    if (material) {
+      cloned.traverse((child) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (child as any).material = material;
-      }
-    });
-  }
+        if ((child as any).isMesh) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (child as any).material = material;
+        }
+      });
+    }
+    return cloned;
+  }, [cloned, material]);
   return (
     <primitive
-      object={scene}
+      object={sceneWithMaterial}
       scale={scale}
       position={position}
       rotation={rotation}

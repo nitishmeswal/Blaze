@@ -9,7 +9,7 @@
  * The model itself is provided as a render-prop so this component stays
  * stack-agnostic (R3F users pass <FloatingModel><GltfModel/></FloatingModel>).
  */
-import { useRef, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { gsap } from "@/kit/_utils/gsap-setup";
 import type { Group } from "three";
 
@@ -46,38 +46,46 @@ export function FlavorCarousel3D({
   className,
 }: FlavorCarousel3DProps) {
   const [currentFlavorIndex, setCurrentFlavorIndex] = useState(0);
+  // Mirror the state in a ref so changeFlavor sees the latest index even
+  // when the user clicks the carousel arrows in rapid succession.
+  const currentIndexRef = useRef(0);
   const modelRef = useRef<Group | null>(null);
 
-  function changeFlavor(index: number) {
-    if (!modelRef.current) return;
-    const nextIndex = (index + flavors.length) % flavors.length;
-    const tl = gsap.timeline();
-    tl.to(
-      modelRef.current.rotation,
-      {
-        y:
-          index > currentFlavorIndex
+  const changeFlavor = useCallback(
+    (index: number) => {
+      if (!modelRef.current) return;
+      const prev = currentIndexRef.current;
+      const nextIndex = (index + flavors.length) % flavors.length;
+      currentIndexRef.current = nextIndex;
+      const goingForward = index > prev;
+      const tl = gsap.timeline();
+      tl.to(
+        modelRef.current.rotation,
+        {
+          y: goingForward
             ? `-=${Math.PI * 2 * spinsOnChange}`
             : `+=${Math.PI * 2 * spinsOnChange}`,
-        ease: "power2.inOut",
-        duration: 1,
-      },
-      0
-    )
-      .to(
-        ".background, .wavy-circles-outer, .wavy-circles-inner",
-        {
-          backgroundColor: flavors[nextIndex].color,
-          fill: flavors[nextIndex].color,
           ease: "power2.inOut",
           duration: 1,
         },
         0
       )
-      .to(".text-wrapper", { duration: 0.2, y: -10, opacity: 0 }, 0)
-      .to({}, { onStart: () => setCurrentFlavorIndex(nextIndex) }, 0.5)
-      .to(".text-wrapper", { duration: 0.2, y: 0, opacity: 1 }, 0.7);
-  }
+        .to(
+          ".background, .wavy-circles-outer, .wavy-circles-inner",
+          {
+            backgroundColor: flavors[nextIndex].color,
+            fill: flavors[nextIndex].color,
+            ease: "power2.inOut",
+            duration: 1,
+          },
+          0
+        )
+        .to(".text-wrapper", { duration: 0.2, y: -10, opacity: 0 }, 0)
+        .to({}, { onStart: () => setCurrentFlavorIndex(nextIndex) }, 0.5)
+        .to(".text-wrapper", { duration: 0.2, y: 0, opacity: 1 }, 0.7);
+    },
+    [flavors, spinsOnChange]
+  );
 
   const current = flavors[currentFlavorIndex];
 
@@ -92,7 +100,7 @@ export function FlavorCarousel3D({
       <h2 className="relative z-10 text-center text-5xl font-bold">{heading}</h2>
       <div className="relative z-10 grid grid-cols-[auto,auto,auto] items-center">
         <button
-          onClick={() => changeFlavor(currentFlavorIndex + 1)}
+          onClick={() => changeFlavor(currentIndexRef.current + 1)}
           aria-label="Previous Flavor"
           className="size-12 rounded-full border-2 border-white bg-white/10 p-3 hover:opacity-100"
         >
@@ -102,7 +110,7 @@ export function FlavorCarousel3D({
           {renderModel({ currentIndex: currentFlavorIndex, flavor: current, modelRef })}
         </div>
         <button
-          onClick={() => changeFlavor(currentFlavorIndex - 1)}
+          onClick={() => changeFlavor(currentIndexRef.current - 1)}
           aria-label="Next Flavor"
           className="size-12 rounded-full border-2 border-white bg-white/10 p-3 hover:opacity-100"
         >

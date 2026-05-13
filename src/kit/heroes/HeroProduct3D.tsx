@@ -49,9 +49,13 @@ export function HeroProduct3D({
   const ready = useReadyStore((s) => s.ready);
   const isDesktop = useMediaQuery("(min-width: 768px)", true);
 
+  // Only block the intro timeline on the 3D scene's ready state when a scene
+  // is actually present on desktop. Without this, mobile or scene-less callers
+  // would never animate (and on desktop without a scene, ready never flips).
+  const waitForScene = Boolean(scene) && isDesktop;
   useGSAP(
     () => {
-      if (!ready && isDesktop) return;
+      if (waitForScene && !ready) return;
 
       gsap
         .timeline()
@@ -93,7 +97,7 @@ export function HeroProduct3D({
         })
         .from(".text-side-body", { y: 20, opacity: 0 });
     },
-    { dependencies: [ready, isDesktop], scope: ref }
+    { dependencies: [ready, isDesktop, waitForScene], scope: ref }
   );
 
   return (

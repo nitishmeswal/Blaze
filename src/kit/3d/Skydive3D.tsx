@@ -8,7 +8,7 @@
  * and scrubbed against scroll. Plug in any 3D primitive via the `renderModel`
  * render-prop.
  */
-import { useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import * as THREE from "three";
 import { Cloud, Clouds, Environment, Text } from "@react-three/drei";
 import { gsap, useGSAP } from "@/kit/_utils/gsap-setup";
@@ -146,8 +146,9 @@ function ThreeText({
   fontUrl?: string;
   color?: string;
 }) {
-  const words = sentence.toUpperCase().split(" ");
-  const material = new THREE.MeshLambertMaterial();
+  const words = useMemo(() => sentence.toUpperCase().split(" "), [sentence]);
+  const material = useMemo(() => new THREE.MeshLambertMaterial(), []);
+  useEffect(() => () => material.dispose(), [material]);
   const isDesktop = useMediaQuery("(min-width: 950px)", true);
   return (
     <>

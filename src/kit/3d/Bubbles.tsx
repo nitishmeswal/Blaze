@@ -12,6 +12,7 @@ import { useFrame } from "@react-three/fiber";
 import gsap from "gsap";
 
 const o = new THREE.Object3D();
+const tmpColor = new THREE.Color();
 
 export type BubblesProps = {
   count?: number;
@@ -67,7 +68,8 @@ export function Bubbles({
   useFrame(() => {
     if (!meshRef.current) return;
     if (bodyColorSync && typeof document !== "undefined") {
-      material.color = new THREE.Color(document.body.style.backgroundColor || "#fff");
+      tmpColor.set(document.body.style.backgroundColor || "#fff");
+      material.color.copy(tmpColor);
     }
     for (let i = 0; i < count; i++) {
       meshRef.current.getMatrixAt(i, o.matrix);

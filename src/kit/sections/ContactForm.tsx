@@ -82,7 +82,8 @@ export function ContactForm({
               ) : (
                 <input
                   id={field}
-                  type={field}
+                  type={field === "email" ? "email" : "text"}
+                  autoComplete={field === "email" ? "email" : "name"}
                   className="w-full rounded-md border border-blaze-line bg-blaze-bg px-3 py-2 outline-none focus:ring-2 focus:ring-blaze-accent"
                   value={values[field]}
                   onChange={(e) =>
