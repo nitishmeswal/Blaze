@@ -10,3 +10,5 @@ dist
 next-env.d.ts
 .turbo
 .cache
+tsconfig.tsbuildinfo
+pnpm-lock.yaml.tmp
