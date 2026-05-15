@@ -3,27 +3,24 @@
 /**
  * /studio — the Figma-style 3D placement canvas.
  *
- *  ┌────────────────────────┬────────────────────────────────────┐
- *  │ Inspector (left, 320)  │  Live preview iframe + overlay     │
- *  │  - model picker        │  /build/preview                    │
- *  │  - section list        │   ↑ transparent <div> for clicks   │
- *  │  - selected placement  │     and marker handles             │
- *  │    inspector           │                                    │
- *  └────────────────────────┴────────────────────────────────────┘
+ *  ┌─────────────────────────────────────────────────────────────┐
+ *  │ AppShell topbar: Chat / Studio / Preview                    │
+ *  ├──────────────┬──────────────────────────────┬───────────────┤
+ *  │ Tools  (60)  │  Live preview iframe (fluid) │ Inspector 280 │
+ *  │  - select    │   + transparent overlay      │  - section    │
+ *  │  - place     │     drawing rects + handles  │  - placement  │
+ *  │              │                              │  - anchor xyz │
+ *  └──────────────┴──────────────────────────────┴───────────────┘
  *
- * Why "real preview + overlay" instead of an abstract canvas?
- *   - The user wants to position a 3D model on the ACTUAL rendered
- *     page (not a Figma mockup that diverges from the deployed
- *     output). The iframe shows the same SiteRenderer that ships in
- *     `/build/preview`, so what you see here = what gets deployed.
- *   - The overlay receives clicks, converts them to section-local
- *     coordinates (using rects the iframe posts back), and writes a
- *     ThreeDPlacement into the section. SiteRenderer's ThreeDLayer
- *     then mounts the model in-iframe so it appears immediately.
+ * The new layout splits the old single-column inspector into a narrow
+ * tool-rail on the left (Figma-style) and a properties inspector on
+ * the right. This keeps the preview as wide as possible — the main
+ * frustration with the old layout.
  *
- * State lives in localStorage under the same `blaze.builder.v1` key
- * the /build page uses, so authoring in studio carries over to chat
- * (and vice versa).
+ * State / persistence behaviour is preserved from Phase 3:
+ *   - localStorage under `blaze.builder.v1` shared with /build
+ *   - postMessage channel to the iframe: ready / rects / clicks
+ *   - `placementModeRef` + `selectedModelRef` avoid stale closures
  */
 import {
   useCallback,
@@ -32,7 +29,7 @@ import {
   useRef,
   useState,
 } from "react";
-import Link from "next/link";
+import { AppShell } from "@/components/AppShell";
 import { EMPTY_SITE_SPEC } from "@/builder/seedSpec";
 import { isSiteSpec } from "@/builder/validate";
 import type { SectionInvocation, SiteSpec, ThreeDPlacement } from "@/builder/types";
@@ -44,7 +41,6 @@ const STORAGE_KEY = "blaze.builder.v1";
 interface PersistedState {
   v: 1;
   spec: SiteSpec;
-  // /build page also persists messages; we don't touch them here.
   messages?: unknown;
 }
 
@@ -111,10 +107,6 @@ export default function StudioPage() {
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const previewReady = useRef(false);
-  // Stable refs for callbacks — the postMessage listener captures these
-  // by reference so it always sees the latest mode / model / spec without
-  // re-binding the listener (which would otherwise drop messages during
-  // re-renders).
   const placementModeRef = useRef<"select" | "place">("select");
   const selectedModelRef = useRef<string>("sphere");
 
@@ -137,7 +129,6 @@ export default function StudioPage() {
   useEffect(() => {
     if (!hydrated) return;
     try {
-      // Read-modify-write so we don't clobber /build's message history.
       const raw = localStorage.getItem(STORAGE_KEY);
       const existing = raw ? (JSON.parse(raw) as PersistedState) : null;
       const next: PersistedState = {
@@ -158,13 +149,10 @@ export default function StudioPage() {
     w.postMessage({ kind: "blaze:set-spec", spec: s }, "*");
   }, []);
 
-  // Push spec on every change once the preview is ready.
   useEffect(() => {
     if (previewReady.current) sendSpec(spec);
   }, [spec, sendSpec]);
 
-  // Keep refs in sync with state on every render so the listener sees
-  // the latest values.
   useEffect(() => {
     placementModeRef.current = placementMode;
   }, [placementMode]);
@@ -172,16 +160,12 @@ export default function StudioPage() {
     selectedModelRef.current = selectedModel;
   }, [selectedModel]);
 
-  // Receive ready / rects / clicks from the iframe. Listener binds once
-  // and reads through refs so we don't churn message subscriptions.
   useEffect(() => {
     function onMessage(ev: MessageEvent) {
       if (!isPreviewMessage(ev.data)) return;
       const data = ev.data;
       if (data.kind === "blaze:preview-ready") {
         previewReady.current = true;
-        // Push the LATEST spec, not the one captured at bind time.
-        // We read it from localStorage to avoid a stale closure.
         try {
           const raw = localStorage.getItem(STORAGE_KEY);
           if (raw) {
@@ -193,7 +177,6 @@ export default function StudioPage() {
         } catch {
           // ignore
         }
-        // Tell the iframe we're in studio mode so it forwards clicks.
         iframeRef.current?.contentWindow?.postMessage(
           { kind: "blaze:studio-mode", active: true },
           "*"
@@ -280,140 +263,216 @@ export default function StudioPage() {
     [spec.sections, selectedSectionId]
   );
 
-  // ─── Overlay rendering ────────────────────────────────────────────
-  // The overlay sits exactly on top of the iframe and draws boxes
-  // around each section + handles for any placement.
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-blaze-bg text-blaze-text">
-      <aside className="flex w-80 flex-col border-r border-blaze-line/60 bg-blaze-bg/90">
-        <header className="border-b border-blaze-line/60 px-4 py-3">
-          <div className="flex items-center justify-between gap-2">
-            <h1 className="text-sm font-semibold">Blaze Studio</h1>
-            <Link
-              href="/build"
-              className="text-xs text-blaze-muted hover:text-blaze-text"
-            >
-              ← chat
-            </Link>
-          </div>
-          <p className="mt-1 text-[11px] text-blaze-muted">
-            Drop 3D models on the live preview. Placements save to the same
-            spec your /build chat is editing.
-          </p>
-        </header>
+    <AppShell fixedBody projectName="Untitled Blaze site" right={<ModePill mode={placementMode} />}>
+      <div className="flex h-full w-full">
+        {/* ─── Left tool rail ─────────────────────────────── */}
+        <aside className="flex h-full w-14 shrink-0 flex-col items-center gap-1 border-r border-blaze-line bg-blaze-surface py-3">
+          <ToolButton
+            active={placementMode === "select"}
+            onClick={() => setPlacementMode("select")}
+            label="Select"
+            shortcut="V"
+          >
+            <CursorIcon className="h-4 w-4" />
+          </ToolButton>
+          <ToolButton
+            active={placementMode === "place"}
+            onClick={() => setPlacementMode("place")}
+            label="Place"
+            shortcut="P"
+          >
+            <PlusIcon className="h-4 w-4" />
+          </ToolButton>
+        </aside>
 
-        <section className="border-b border-blaze-line/60 px-4 py-3">
-          <h2 className="text-[11px] uppercase tracking-widest text-blaze-muted">
-            mode
-          </h2>
-          <div className="mt-2 grid grid-cols-2 gap-1">
+        {/* ─── Center preview + overlay ───────────────────── */}
+        <section className="relative flex h-full flex-1 flex-col bg-blaze-bg">
+          <div className="flex shrink-0 items-center gap-2 border-b border-blaze-line bg-blaze-bg px-3 py-2 text-[11px] text-blaze-muted">
             <button
               type="button"
-              className={modeBtn(placementMode === "select")}
-              onClick={() => setPlacementMode("select")}
+              onClick={() => {
+                if (iframeRef.current) {
+                  previewReady.current = false;
+                  iframeRef.current.src = PREVIEW_URL;
+                }
+              }}
+              title="Reload preview"
+              className="rounded-md border border-blaze-line bg-blaze-surface px-2 py-1 hover:border-blaze-line2 hover:text-blaze-text"
             >
-              select
+              ↻
             </button>
-            <button
-              type="button"
-              className={modeBtn(placementMode === "place")}
-              onClick={() => setPlacementMode("place")}
-              title="Click anywhere on the preview to drop the selected model"
-            >
-              place
-            </button>
+            <div className="flex-1 truncate rounded-md border border-blaze-line bg-blaze-surface px-2 py-1 font-mono text-[10px] text-blaze-mutedDim">
+              blaze.app{PREVIEW_URL}
+            </div>
+            <span className="hidden rounded-md border border-blaze-line bg-blaze-surface px-2 py-1 font-mono text-[10px] text-blaze-mutedDim sm:inline">
+              {viewport.w || "—"} × {viewport.h || "—"}
+            </span>
+          </div>
+          <div className="relative flex-1 overflow-hidden bg-black">
+            <iframe
+              ref={iframeRef}
+              src={PREVIEW_URL}
+              title="Blaze preview"
+              className="absolute inset-0 h-full w-full border-0"
+            />
+            <PreviewOverlay
+              rects={rects}
+              scrollY={scrollY}
+              spec={spec}
+              selectedSectionId={selectedSectionId}
+              mode={placementMode}
+            />
           </div>
         </section>
 
-        <section className="border-b border-blaze-line/60 px-4 py-3">
-          <h2 className="text-[11px] uppercase tracking-widest text-blaze-muted">
-            model to drop
-          </h2>
-          <div className="mt-2 flex flex-col gap-1">
-            {MODEL_OPTIONS.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => setSelectedModel(m.id)}
-                className={`rounded-md border px-2 py-1.5 text-left text-xs transition-colors ${
-                  selectedModel === m.id
-                    ? "border-blaze-accent/60 bg-blaze-accent/10 text-blaze-text"
-                    : "border-blaze-line/60 bg-transparent text-blaze-muted hover:border-blaze-line hover:text-blaze-text"
-                }`}
-              >
-                <div className="font-medium">{m.label}</div>
-                <div className="text-[10px] opacity-70">{m.description}</div>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="flex-1 overflow-auto px-4 py-3">
-          <h2 className="text-[11px] uppercase tracking-widest text-blaze-muted">
-            sections
-          </h2>
-          <ul className="mt-2 flex flex-col gap-1">
-            {spec.sections.map((s) => (
-              <li key={s.id}>
+        {/* ─── Right inspector ────────────────────────────── */}
+        <aside className="flex h-full w-[300px] shrink-0 flex-col border-l border-blaze-line bg-blaze-surface">
+          <Panel title="Model to drop">
+            <div className="flex flex-col gap-1">
+              {MODEL_OPTIONS.map((m) => (
                 <button
+                  key={m.id}
                   type="button"
-                  onClick={() => setSelectedSectionId(s.id)}
-                  className={`flex w-full items-center justify-between rounded-md border px-2 py-1.5 text-left text-xs transition-colors ${
-                    selectedSectionId === s.id
-                      ? "border-blaze-accent/60 bg-blaze-accent/10"
-                      : "border-blaze-line/60 hover:border-blaze-line"
-                  }`}
+                  onClick={() => setSelectedModel(m.id)}
+                  className={[
+                    "rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors",
+                    selectedModel === m.id
+                      ? "border-blaze-accent/60 bg-blaze-accent/10 text-blaze-text"
+                      : "border-blaze-line bg-transparent text-blaze-muted hover:border-blaze-line2 hover:text-blaze-text",
+                  ].join(" ")}
                 >
-                  <span className="truncate">
-                    <span className="font-medium">{s.id}</span>{" "}
-                    <span className="text-blaze-muted">· {s.componentId}</span>
-                  </span>
-                  {s.threeD ? (
-                    <span className="ml-2 rounded bg-blaze-accent/20 px-1.5 py-0.5 text-[10px] text-blaze-accent">
-                      3D
-                    </span>
-                  ) : null}
+                  <div className="font-medium">{m.label}</div>
+                  <div className="mt-0.5 text-[10px] opacity-70">{m.description}</div>
                 </button>
-              </li>
-            ))}
-            {spec.sections.length === 0 ? (
-              <li className="rounded-md border border-dashed border-blaze-line/60 px-2 py-3 text-center text-[11px] text-blaze-muted">
-                No sections yet — head to /build and prompt for a page first.
-              </li>
-            ) : null}
-          </ul>
-        </section>
+              ))}
+            </div>
+          </Panel>
 
-        {selectedSection ? (
-          <PlacementInspector
-            section={selectedSection}
-            onUpdate={(patch) => updatePlacement(selectedSection.id, patch)}
-            onUpdateAnchor={(a) => updatePlacementAnchor(selectedSection.id, a)}
-            onRemove={() => removePlacement(selectedSection.id)}
-          />
-        ) : null}
-      </aside>
+          <Panel title="Sections" flex>
+            <ul className="flex flex-col gap-1">
+              {spec.sections.map((s) => (
+                <li key={s.id}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSectionId(s.id)}
+                    className={[
+                      "flex w-full items-center justify-between rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors",
+                      selectedSectionId === s.id
+                        ? "border-blaze-accent/60 bg-blaze-accent/10"
+                        : "border-blaze-line hover:border-blaze-line2",
+                    ].join(" ")}
+                  >
+                    <span className="truncate">
+                      <span className="font-medium">{s.id}</span>{" "}
+                      <span className="text-blaze-muted">· {s.componentId}</span>
+                    </span>
+                    {s.threeD ? (
+                      <span className="ml-2 rounded bg-blaze-accent/20 px-1.5 py-0.5 text-[10px] text-blaze-accent">
+                        3D
+                      </span>
+                    ) : null}
+                  </button>
+                </li>
+              ))}
+              {spec.sections.length === 0 ? (
+                <li className="rounded-md border border-dashed border-blaze-line px-2 py-3 text-center text-[11px] text-blaze-muted">
+                  No sections yet — head to <span className="text-blaze-text">Chat</span> and prompt for a page first.
+                </li>
+              ) : null}
+            </ul>
+          </Panel>
 
-      <main className="relative flex-1 overflow-hidden">
-        <iframe
-          ref={iframeRef}
-          src={PREVIEW_URL}
-          title="Blaze preview"
-          className="absolute inset-0 h-full w-full border-0 bg-black"
-        />
-        {/* Overlay — drawn on top of the iframe. pointer-events: none
-            for the bulk; section boxes + handles are pointer-events:auto
-            for selection but never block clicks on the iframe content. */}
-        <PreviewOverlay
-          rects={rects}
-          scrollY={scrollY}
-          viewport={viewport}
-          spec={spec}
-          selectedSectionId={selectedSectionId}
-          mode={placementMode}
-        />
-      </main>
-    </div>
+          {selectedSection ? (
+            <PlacementInspector
+              section={selectedSection}
+              onUpdate={(patch) => updatePlacement(selectedSection.id, patch)}
+              onUpdateAnchor={(a) => updatePlacementAnchor(selectedSection.id, a)}
+              onRemove={() => removePlacement(selectedSection.id)}
+            />
+          ) : null}
+        </aside>
+      </div>
+    </AppShell>
+  );
+}
+
+// ── Subcomponents ─────────────────────────────────────────────────
+
+function Panel({
+  title,
+  flex,
+  children,
+}: {
+  title: string;
+  flex?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      className={[
+        "border-b border-blaze-line px-3 py-3",
+        flex && "scrollbar-thin flex-1 overflow-y-auto",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <h2 className="mb-2 text-[10px] font-medium uppercase tracking-widest text-blaze-mutedDim">
+        {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+function ToolButton({
+  active,
+  onClick,
+  label,
+  shortcut,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  shortcut?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={shortcut ? `${label} (${shortcut})` : label}
+      className={[
+        "group relative grid h-9 w-9 place-items-center rounded-md transition-colors",
+        active
+          ? "bg-blaze-accent/15 text-blaze-accent ring-1 ring-blaze-accent/40"
+          : "text-blaze-muted hover:bg-blaze-surface2 hover:text-blaze-text",
+      ].join(" ")}
+    >
+      {children}
+      {shortcut ? (
+        <span className="pointer-events-none absolute left-full ml-2 hidden whitespace-nowrap rounded-md border border-blaze-line bg-blaze-surface2 px-2 py-1 text-[10px] uppercase tracking-widest text-blaze-muted shadow-blaze-pop group-hover:block">
+          {label} <span className="ml-1 rounded bg-blaze-line2 px-1 font-mono text-blaze-text">{shortcut}</span>
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+function ModePill({ mode }: { mode: "select" | "place" }) {
+  return (
+    <span
+      className={[
+        "hidden items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-widest sm:inline-flex",
+        mode === "place"
+          ? "border-blaze-accent/40 bg-blaze-accent/10 text-blaze-accent"
+          : "border-blaze-line bg-blaze-surface text-blaze-muted",
+      ].join(" ")}
+    >
+      <span className={mode === "place" ? "h-1.5 w-1.5 rounded-full bg-blaze-accent" : "h-1.5 w-1.5 rounded-full bg-blaze-muted"} />
+      {mode} mode
+    </span>
   );
 }
 
@@ -430,9 +489,9 @@ function PlacementInspector({
 }) {
   const p = section.threeD;
   return (
-    <div className="border-t border-blaze-line/60 bg-blaze-bg/95 px-4 py-3">
-      <h2 className="text-[11px] uppercase tracking-widest text-blaze-muted">
-        placement · {section.id}
+    <section className="border-t border-blaze-line bg-blaze-surface2/50 px-3 py-3">
+      <h2 className="text-[10px] font-medium uppercase tracking-widest text-blaze-mutedDim">
+        Placement · <span className="text-blaze-text">{section.id}</span>
       </h2>
       {!p ? (
         <p className="mt-2 text-xs text-blaze-muted">
@@ -444,7 +503,7 @@ function PlacementInspector({
         <div className="mt-2 flex flex-col gap-2 text-xs">
           <div className="flex items-center justify-between">
             <span className="text-blaze-muted">model</span>
-            <span className="font-mono">
+            <span className="font-mono text-blaze-text">
               {p.model.kind === "gltf" ? "gltf" : p.model.componentId}
             </span>
           </div>
@@ -465,20 +524,20 @@ function PlacementInspector({
                   })
                 }
                 placeholder="https://…/model.glb"
-                className="rounded border border-blaze-line/60 bg-black/40 px-2 py-1 text-xs"
+                className="rounded-md border border-blaze-line bg-blaze-bg px-2 py-1 text-xs"
               />
             </label>
           ) : null}
           <button
             type="button"
             onClick={onRemove}
-            className="mt-1 rounded border border-red-500/40 bg-red-500/10 px-2 py-1 text-xs text-red-300 hover:bg-red-500/20"
+            className="mt-1 rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1 text-xs text-red-300 hover:bg-red-500/20"
           >
             remove 3D layer
           </button>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -503,7 +562,7 @@ function CoordRow({
           onChange={(e) =>
             onChange({ ...value, [axis]: Number(e.target.value) || 0 })
           }
-          className="w-full rounded border border-blaze-line/60 bg-black/40 px-1.5 py-1 text-right font-mono text-[11px]"
+          className="w-full rounded-md border border-blaze-line bg-blaze-bg px-1.5 py-1 text-right font-mono text-[11px]"
         />
       ))}
     </div>
@@ -513,19 +572,16 @@ function CoordRow({
 function PreviewOverlay({
   rects,
   scrollY,
-  viewport,
   spec,
   selectedSectionId,
   mode,
 }: {
   rects: SectionRect[];
   scrollY: number;
-  viewport: { w: number; h: number };
   spec: SiteSpec;
   selectedSectionId: string | null;
   mode: "select" | "place";
 }) {
-  void viewport;
   const sectionsById = useMemo(
     () => Object.fromEntries(spec.sections.map((s) => [s.id, s])),
     [spec.sections]
@@ -543,7 +599,7 @@ function PreviewOverlay({
         if (!section) return null;
         const isSelected = selectedSectionId === r.id;
         const screenTop = r.top - scrollY;
-        const screenLeft = 0; // iframe fills the main area
+        const screenLeft = 0;
         return (
           <div key={r.id}>
             <div
@@ -611,11 +667,20 @@ function PlacementMarker({
   );
 }
 
-function modeBtn(active: boolean): string {
-  return [
-    "rounded-md px-2 py-1.5 text-xs transition-colors",
-    active
-      ? "bg-blaze-accent text-black"
-      : "border border-blaze-line/60 text-blaze-muted hover:text-blaze-text",
-  ].join(" ");
+// ── Icons (inline SVG, no external dep) ──────────────────────────
+
+function CursorIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M5 3l5 14 2-6 6-2-13-6z" />
+    </svg>
+  );
+}
+
+function PlusIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
 }

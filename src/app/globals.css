@@ -3,16 +3,23 @@
 @tailwind utilities;
 
 :root {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans:
+    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    sans-serif;
   --font-display: var(--font-sans);
+  --font-mono:
+    ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 html,
 body {
-  background: #0a0a0f;
-  color: #e8e8ef;
+  background: #0a0a0c;
+  color: #f5f5f7;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   scroll-behavior: smooth;
+  /* Lovable-style tight, professional tracking. */
+  letter-spacing: -0.005em;
 }
 
 html.smooth-scroll,
@@ -26,7 +33,7 @@ body.no-scroll {
 
 ::selection {
   background: #ff5a1f;
-  color: #0a0a0f;
+  color: #0a0a0c;
 }
 
 @layer utilities {
@@ -34,16 +41,39 @@ body.no-scroll {
   .col-center  { @apply flex flex-col items-center justify-center; }
   .abs-center  { @apply absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2; }
   .text-balance { text-wrap: balance; }
+  .text-pretty  { text-wrap: pretty; }
+
+  /* Slim, themed scrollbars used across the shell. */
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: #1f1f2c transparent;
+    scrollbar-color: #262631 transparent;
   }
   .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
-  .scrollbar-thin::-webkit-scrollbar-thumb { background: #1f1f2c; border-radius: 4px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: #262631;
+    border-radius: 4px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: #353544;
+  }
+
+  /* Faint dotted grid for hero / empty states. */
   .grid-bg {
     background-image:
       linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
       linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
     background-size: 32px 32px;
+  }
+
+  /* Subtle radial wash used behind hero copy. */
+  .hero-glow {
+    background:
+      radial-gradient(60% 80% at 50% 0%, rgba(255,90,31,0.18), transparent 70%),
+      radial-gradient(50% 70% at 80% 100%, rgba(255,181,71,0.10), transparent 70%);
+  }
+
+  /* Card surface used by the new shell. */
+  .blaze-card {
+    @apply rounded-xl border border-blaze-line bg-blaze-surface;
   }
 }
