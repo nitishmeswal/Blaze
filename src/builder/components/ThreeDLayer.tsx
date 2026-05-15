@@ -2,21 +2,51 @@
 
 /**
  * ThreeDLayer — mounts a 3D model on top of a section, anchored to
- * the section's local CSS coordinate space.
+ * the section's local CSS coordinate space with **pixel-exact**
+ * placement.
  *
- * Phase 3 wires the simplest possible runtime: the model sits at the
- * placement's `anchor` (x, y in section px, z forward/back) and
- * gently animates per the model option. Phase 3-followup wires the
- * full CoordinateMapPlayer when `placement.coordinateMap` is present
- * so the model travels along an authored scroll path.
+ * How the coordinate system works (Phase 3.1)
+ * -------------------------------------------
+ * The Canvas fills the section via `absolute inset-0`. Inside the
+ * canvas we drive a fixed **orthographic camera** so that one Three
+ * world unit equals one CSS pixel:
  *
- * The Canvas is absolutely-positioned over the section with
- * `pointer-events: none` so it never steals clicks from the DOM
- * content underneath. The studio's overlay catches placement clicks
- * BEFORE they reach this layer.
+ *   left:   0
+ *   right:  sectionWidth        // section.clientWidth in CSS px
+ *   top:    0
+ *   bottom: -sectionHeight      // section.clientHeight in CSS px (negative
+ *                                // because Three's Y axis goes UP and the
+ *                                // DOM's Y axis goes DOWN)
+ *   near:  -1000 / far: +1000
+ *
+ * Then a placement at section-pixel anchor (Ax, Ay) renders at
+ * world position (Ax, -Ay, anchor.z). Clicking at pixel (Ax, Ay)
+ * on the iframe sets exactly those numbers in the spec, so the
+ * mesh lands EXACTLY where the author clicked — no more "near but
+ * not on" drift.
+ *
+ * Why ortho and not perspective?
+ *   - Perspective requires a depth (z) plane to do a 2D → 3D
+ *     unproject, which is ambiguous for our authoring workflow
+ *     (the author thinks in 2D screen pixels, not in world depth).
+ *   - Ortho gives a perfect 1:1 pixel mapping that survives window
+ *     resizes and section reflows.
+ *
+ * Mesh sizing
+ *   Primitives are sized in **pixel units** with `scale` defaulting
+ *   to 1.0 (= a ~160px-diameter mesh). The inspector still lets you
+ *   tweak scale via the placement props. anchor.z controls draw
+ *   order and the orbit radius for floating motion.
+ *
+ * The Canvas has `pointer-events: none` so DOM content and the
+ * studio overlay catch clicks before the canvas does.
  */
-import { useRef, useState, useEffect, type ReactNode } from "react";
-import { Canvas as R3FCanvas, useFrame } from "@react-three/fiber";
+import {
+  useRef,
+  useEffect,
+  type ReactNode,
+} from "react";
+import { Canvas as R3FCanvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import type { ThreeDPlacement } from "@/builder/types";
 import { Bubbles } from "@/kit/3d/Bubbles";
@@ -24,65 +54,92 @@ import { GltfModel } from "@/kit/3d/GltfModel";
 
 export interface ThreeDLayerProps {
   placement: ThreeDPlacement;
-  /** Section size; the Canvas matches this. */
-  sectionWidth?: number;
-  sectionHeight?: number;
 }
 
+/**
+ * Outer wrapper: lays a full-bleed canvas over the parent section.
+ * The parent (a SiteRenderer section) is positioned `relative`, so
+ * `absolute inset-0` covers it exactly. We also expose
+ * `data-3d-layer` so the studio overlay can ignore these wrappers
+ * when reading section rects.
+ */
 export function ThreeDLayer({ placement }: ThreeDLayerProps) {
-  // The section is positioned `relative` in SiteRenderer so absolute
-  // positioning here lays the canvas exactly on top.
   return (
     <div
       data-3d-layer
       className="pointer-events-none absolute inset-0 z-10"
       aria-hidden="true"
     >
-      <R3FCanvas camera={{ position: [0, 0, 5], fov: 50 }} dpr={[1, 2]}>
-        <ambientLight intensity={0.7} />
-        <directionalLight position={[3, 4, 5]} intensity={1.2} />
-        <PlacementModel placement={placement} />
+      <R3FCanvas
+        // No explicit camera prop — we install our own ortho camera
+        // inside the canvas via <PixelOrthoCamera /> so its bounds
+        // can react to live size changes from R3F's viewport.
+        dpr={[1, 2]}
+        gl={{ antialias: true, alpha: true }}
+        // Transparent so the section's DOM content shows through.
+        style={{ background: "transparent" }}
+      >
+        <PixelOrthoCamera />
+        <ambientLight intensity={0.75} />
+        <directionalLight position={[120, 200, 300]} intensity={1.1} />
+        <PlacementGroup placement={placement} />
       </R3FCanvas>
     </div>
   );
 }
 
 /**
- * Resolve a ThreeDPlacement to an R3F element. New primitives can be
- * added by extending the `componentId` switch; entries here MUST
- * match ids declared in `src/builder/threeD/models.ts`.
+ * Install an orthographic camera whose viewport bounds equal the
+ * canvas's CSS pixel size, so 1 world unit == 1 CSS pixel and the
+ * world's (0, 0) sits at the section's **top-left**.
+ *
+ * R3F's `size` (from useThree) gives the canvas size in CSS pixels.
+ * On every size change we rebuild the camera's frustum and re-set it
+ * as the default camera. The Y axis is flipped (top=0, bottom=-h) so
+ * that DOM-style coords (Y grows downward) translate to Three coords
+ * by simple negation of the Y value.
  */
-function PlacementModel({ placement }: { placement: ThreeDPlacement }) {
-  const groupRef = useRef<THREE.Group>(null);
-  const anchor = placement.anchor ?? { x: 0, y: 0, z: 0 };
+function PixelOrthoCamera() {
+  const set = useThree((s) => s.set);
+  const size = useThree((s) => s.size);
+  const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
 
-  // Convert the placement's section-pixel anchor into Three units.
-  // The Canvas fills the section, so we approximate by mapping the
-  // section's CSS width into the Three viewport (~6 units wide at the
-  // default camera + fov). The studio inspector lets the author tweak
-  // anchor.z explicitly when needed.
-  const [unit, setUnit] = useState(1 / 80);
+  if (!cameraRef.current) {
+    cameraRef.current = new THREE.OrthographicCamera(
+      0,
+      Math.max(1, size.width),
+      0,
+      -Math.max(1, size.height),
+      -1000,
+      1000
+    );
+    cameraRef.current.position.set(0, 0, 500);
+    cameraRef.current.lookAt(0, 0, 0);
+  }
+
   useEffect(() => {
-    function recalc() {
-      const el = (groupRef.current?.parent as THREE.Object3D | undefined);
-      void el;
-      // Heuristic: 1 Three unit ≈ window.innerWidth / 6 px.
-      const w = typeof window !== "undefined" ? window.innerWidth : 1024;
-      setUnit(6 / w);
-    }
-    recalc();
-    if (typeof window !== "undefined") {
-      window.addEventListener("resize", recalc);
-      return () => window.removeEventListener("resize", recalc);
-    }
-  }, []);
+    const cam = cameraRef.current;
+    if (!cam) return;
+    cam.left = 0;
+    cam.right = Math.max(1, size.width);
+    cam.top = 0;
+    cam.bottom = -Math.max(1, size.height);
+    cam.updateProjectionMatrix();
+    set({ camera: cam });
+  }, [set, size.width, size.height]);
 
-  const x = (anchor.x - 0.5 * (typeof window !== "undefined" ? window.innerWidth : 1024)) * unit;
-  const y = -(anchor.y - 200) * unit; // 200px offset = "near the top of the section"
-  const z = anchor.z;
+  return null;
+}
 
+/**
+ * Position the placement group at the placement's section-pixel
+ * anchor. Because the camera is ortho with top-left origin, the only
+ * transformation needed is a sign flip on Y.
+ */
+function PlacementGroup({ placement }: { placement: ThreeDPlacement }) {
+  const anchor = placement.anchor ?? { x: 0, y: 0, z: 0 };
   return (
-    <group ref={groupRef} position={[x, y, z]}>
+    <group position={[anchor.x, -anchor.y, anchor.z]}>
       {renderPlacement(placement)}
     </group>
   );
@@ -93,9 +150,15 @@ function renderPlacement(p: ThreeDPlacement): ReactNode {
     if (!p.model.url) {
       return <PrimitiveSphere color="#444" />;
     }
-    return <GltfModel url={p.model.url} />;
+    // glTF models are authored in their own scale; we apply a sane
+    // default to bring them into "section-pixel space". Authors who
+    // need a different size can wrap their glb in a transform.
+    return (
+      <group scale={120}>
+        <GltfModel url={p.model.url} />
+      </group>
+    );
   }
-  // Kit primitive.
   const props = p.model.props ?? {};
   switch (p.model.componentId) {
     case "sphere":
@@ -105,10 +168,12 @@ function renderPlacement(p: ThreeDPlacement): ReactNode {
     case "torus":
       return <PrimitiveTorus {...(props as PrimitiveColorProps)} />;
     case "Bubbles":
-      return <Bubbles {...(props as Record<string, never>)} />;
+      return (
+        <group scale={80}>
+          <Bubbles {...(props as Record<string, never>)} />
+        </group>
+      );
     default:
-      // Unknown component — render a neutral placeholder so the layout
-      // doesn't go blank, and surface the issue visually.
       return <PrimitiveSphere color="#888" />;
   }
 }
@@ -118,6 +183,10 @@ interface PrimitiveColorProps {
   scale?: number;
 }
 
+// Default primitive radius (in CSS pixels). 80px radius → 160px diameter
+// which reads as a clear "marker" without dominating most sections.
+const PX_R = 80;
+
 function PrimitiveSphere({ color = "#ff5a1f", scale = 1 }: PrimitiveColorProps) {
   const ref = useRef<THREE.Mesh>(null);
   useFrame((_, dt) => {
@@ -126,8 +195,14 @@ function PrimitiveSphere({ color = "#ff5a1f", scale = 1 }: PrimitiveColorProps) 
   });
   return (
     <mesh ref={ref} scale={scale}>
-      <sphereGeometry args={[0.7, 32, 32]} />
-      <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.25} />
+      <sphereGeometry args={[PX_R, 48, 48]} />
+      <meshStandardMaterial
+        color={color}
+        emissive={color}
+        emissiveIntensity={0.35}
+        roughness={0.35}
+        metalness={0.1}
+      />
     </mesh>
   );
 }
@@ -138,11 +213,11 @@ function PrimitiveCube({ color = "#fafafa", scale = 1 }: PrimitiveColorProps) {
     if (!ref.current) return;
     ref.current.rotation.x += dt * 0.4;
     ref.current.rotation.y += dt * 0.5;
-    ref.current.position.y = Math.sin(state.clock.elapsedTime * 1.5) * 0.15;
+    ref.current.position.y = Math.sin(state.clock.elapsedTime * 1.5) * 12;
   });
   return (
     <mesh ref={ref} scale={scale}>
-      <boxGeometry args={[1.1, 1.1, 1.1]} />
+      <boxGeometry args={[PX_R * 1.6, PX_R * 1.6, PX_R * 1.6]} />
       <meshStandardMaterial color={color} wireframe />
     </mesh>
   );
@@ -157,8 +232,9 @@ function PrimitiveTorus({ color = "#d4b266", scale = 1 }: PrimitiveColorProps) {
   });
   return (
     <mesh ref={ref} scale={scale}>
-      <torusKnotGeometry args={[0.6, 0.18, 100, 16]} />
+      <torusKnotGeometry args={[PX_R * 0.85, PX_R * 0.25, 100, 16]} />
       <meshStandardMaterial color={color} metalness={0.6} roughness={0.25} />
     </mesh>
   );
 }
+
