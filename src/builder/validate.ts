@@ -68,11 +68,15 @@ function isSection(sec: unknown): boolean {
   if (s.props === null || typeof s.props !== "object" || Array.isArray(s.props)) {
     return false;
   }
-  // Optional background — if present, must be a recognised kind. We
-  // reject the whole section rather than silently dropping the field
-  // so the user sees the model's mistake in the chat error rather
-  // than a half-broken preview.
-  if (s.background !== undefined && !isSectionBackground(s.background)) {
+  // Optional background. `null` and `undefined` both mean "no
+  // background" — only reject when the field is present with the
+  // wrong shape, so the user sees the model's mistake in the chat
+  // error rather than a half-broken preview.
+  if (
+    s.background !== undefined &&
+    s.background !== null &&
+    !isSectionBackground(s.background)
+  ) {
     return false;
   }
   return true;

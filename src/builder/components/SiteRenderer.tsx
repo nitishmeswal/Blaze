@@ -90,15 +90,20 @@ function UnwiredFallback({
       data-section-id={section.id}
       className="relative border-y border-dashed border-amber-500/40 bg-amber-500/5 p-8 text-amber-200"
     >
-      <p className="text-xs uppercase tracking-widest text-amber-400">
-        Component not yet wired
-      </p>
-      <p className="mt-2 font-mono text-sm">{section.componentId}</p>
-      <p className="mt-1 text-xs opacity-70">
-        The LLM picked this from the kit registry but the builder runtime
-        hasn&apos;t wired it yet. Add it to{" "}
-        <code className="font-mono">src/builder/componentMap.ts</code>.
-      </p>
+      {section.background ? (
+        <BackgroundLayer background={section.background} />
+      ) : null}
+      <div className="relative" style={{ zIndex: 1 }}>
+        <p className="text-xs uppercase tracking-widest text-amber-400">
+          Component not yet wired
+        </p>
+        <p className="mt-2 font-mono text-sm">{section.componentId}</p>
+        <p className="mt-1 text-xs opacity-70">
+          The LLM picked this from the kit registry but the builder runtime
+          hasn&apos;t wired it yet. Add it to{" "}
+          <code className="font-mono">src/builder/componentMap.ts</code>.
+        </p>
+      </div>
       {section.threeD ? (
         <ThreeDLayer
           placement={section.threeD}
