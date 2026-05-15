@@ -15,7 +15,22 @@ import { componentMap, isWired } from "@/builder/componentMap";
 import { ThreeDLayer } from "@/builder/components/ThreeDLayer";
 import type { SectionInvocation, SiteSpec } from "@/builder/types";
 
-export function SiteRenderer({ spec }: { spec: SiteSpec }) {
+/**
+ * Optional map of `sectionId → forcedProgress (0..1)` used by the
+ * studio scrub slider to drive a placement's motion path without
+ * actually scrolling the iframe. In production (the deploy target)
+ * the consumer doesn't pass this prop and motion is derived from
+ * real scroll.
+ */
+export interface SiteRendererProps {
+  spec: SiteSpec;
+  forcedProgressBySectionId?: Record<string, number>;
+}
+
+export function SiteRenderer({
+  spec,
+  forcedProgressBySectionId,
+}: SiteRendererProps) {
   // Memoise so swapping in a structurally-identical spec doesn't
   // remount every section.
   const sections = useMemo(() => spec.sections, [spec.sections]);
@@ -23,26 +38,47 @@ export function SiteRenderer({ spec }: { spec: SiteSpec }) {
   return (
     <main className="min-h-screen w-full bg-[var(--blaze-bg,#0a0a0a)] text-[var(--blaze-fg,#fafafa)]">
       {sections.map((section) => (
-        <SectionMount key={section.id} section={section} />
+        <SectionMount
+          key={section.id}
+          section={section}
+          forcedProgress={forcedProgressBySectionId?.[section.id]}
+        />
       ))}
     </main>
   );
 }
 
-function SectionMount({ section }: { section: SectionInvocation }) {
+function SectionMount({
+  section,
+  forcedProgress,
+}: {
+  section: SectionInvocation;
+  forcedProgress?: number;
+}) {
   if (!isWired(section.componentId)) {
-    return <UnwiredFallback section={section} />;
+    return <UnwiredFallback section={section} forcedProgress={forcedProgress} />;
   }
   const Comp = componentMap[section.componentId];
   return (
     <section data-section-id={section.id} className="relative">
       <Comp {...section.props} />
-      {section.threeD ? <ThreeDLayer placement={section.threeD} /> : null}
+      {section.threeD ? (
+        <ThreeDLayer
+          placement={section.threeD}
+          forcedProgress={forcedProgress}
+        />
+      ) : null}
     </section>
   );
 }
 
-function UnwiredFallback({ section }: { section: SectionInvocation }) {
+function UnwiredFallback({
+  section,
+  forcedProgress,
+}: {
+  section: SectionInvocation;
+  forcedProgress?: number;
+}) {
   return (
     <section
       data-section-id={section.id}
@@ -57,7 +93,12 @@ function UnwiredFallback({ section }: { section: SectionInvocation }) {
         hasn&apos;t wired it yet. Add it to{" "}
         <code className="font-mono">src/builder/componentMap.ts</code>.
       </p>
-      {section.threeD ? <ThreeDLayer placement={section.threeD} /> : null}
+      {section.threeD ? (
+        <ThreeDLayer
+          placement={section.threeD}
+          forcedProgress={forcedProgress}
+        />
+      ) : null}
     </section>
   );
 }

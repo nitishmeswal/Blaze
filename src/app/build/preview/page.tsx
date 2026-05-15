@@ -31,12 +31,55 @@ interface SetSpecMessage {
   spec: SiteSpec;
 }
 
+/**
+ * Studio scrub message: drive the motion of a single placement to a
+ * specific scroll progress (0..1) without scrolling the iframe. Lets
+ * the studio preview a placement's motion path while authoring it.
+ *
+ * `progress` of null clears the override for that section so the
+ * model resumes following real scroll.
+ */
+interface SetForcedProgressMessage {
+  kind: "blaze:set-forced-progress";
+  sectionId: string;
+  progress: number | null;
+}
+
+/**
+ * Scroll the iframe document to a specific y coordinate. Used by the
+ * studio when the author wants to inspect a section's full scroll
+ * range. We accept `behavior` so smooth-scroll feels intentional.
+ */
+interface ScrollToMessage {
+  kind: "blaze:scroll-to";
+  y: number;
+  behavior?: "auto" | "smooth";
+}
+
 function isSetSpecMessage(data: unknown): data is SetSpecMessage {
   return (
     !!data &&
     typeof data === "object" &&
     (data as { kind?: unknown }).kind === "blaze:set-spec"
   );
+}
+
+function isSetForcedProgressMessage(
+  data: unknown
+): data is SetForcedProgressMessage {
+  if (!data || typeof data !== "object") return false;
+  const d = data as Partial<SetForcedProgressMessage>;
+  return (
+    d.kind === "blaze:set-forced-progress" &&
+    typeof d.sectionId === "string" &&
+    (d.progress === null || typeof d.progress === "number")
+  );
+}
+
+function isScrollToMessage(data: unknown): data is ScrollToMessage {
+  if (!data || typeof data !== "object") return false;
+  const d = data as Partial<ScrollToMessage>;
+  return d.kind === "blaze:scroll-to" && typeof d.y === "number";
 }
 
 interface SectionRect {
@@ -53,6 +96,9 @@ interface SectionRect {
 
 export default function BuildPreviewPage() {
   const [spec, setSpec] = useState<SiteSpec>(EMPTY_SITE_SPEC);
+  const [forcedProgressBySectionId, setForcedProgress] = useState<
+    Record<string, number>
+  >({});
   const rootRef = useRef<HTMLDivElement>(null);
 
   /**
@@ -89,11 +135,34 @@ export default function BuildPreviewPage() {
     );
   }, []);
 
-  // Spec sync from parent.
+  // Spec sync + scrub / scroll-to control channel from the parent.
   useEffect(() => {
     function onMessage(ev: MessageEvent) {
-      if (!isSetSpecMessage(ev.data)) return;
-      setSpec(ev.data.spec);
+      if (isSetSpecMessage(ev.data)) {
+        setSpec(ev.data.spec);
+        return;
+      }
+      if (isSetForcedProgressMessage(ev.data)) {
+        const { sectionId, progress } = ev.data;
+        setForcedProgress((prev) => {
+          if (progress === null) {
+            // Clear override.
+            if (!(sectionId in prev)) return prev;
+            const next = { ...prev };
+            delete next[sectionId];
+            return next;
+          }
+          return { ...prev, [sectionId]: progress };
+        });
+        return;
+      }
+      if (isScrollToMessage(ev.data)) {
+        window.scrollTo({
+          top: ev.data.y,
+          behavior: ev.data.behavior ?? "auto",
+        });
+        return;
+      }
     }
     window.addEventListener("message", onMessage);
     // Announce readiness so the parent can push the initial spec.
@@ -169,7 +238,10 @@ export default function BuildPreviewPage() {
 
   return (
     <div ref={rootRef}>
-      <SiteRenderer spec={spec} />
+      <SiteRenderer
+        spec={spec}
+        forcedProgressBySectionId={forcedProgressBySectionId}
+      />
     </div>
   );
 }
