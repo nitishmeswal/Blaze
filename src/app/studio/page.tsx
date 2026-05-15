@@ -413,18 +413,45 @@ export default function StudioPage() {
   // When the author drags the scrub slider, push a forced-progress
   // override to the iframe so the placement animates in place.
   // Clearing the override (scrubProgress=null) restores real scroll.
+  //
+  // We also track the previously-selected section id so that when the
+  // author switches sections we can explicitly clear that section's
+  // forced-progress in the iframe (otherwise it stays frozen at the
+  // last scrub value forever — see Devin Review BUG_0001 on PR #11).
+  const prevSelectedSectionIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!previewReady.current) return;
-    const id = selectedSectionId;
-    if (!id) return;
-    iframeRef.current?.contentWindow?.postMessage(
-      {
-        kind: "blaze:set-forced-progress",
-        sectionId: id,
-        progress: scrubProgress,
-      },
-      "*"
-    );
+    const win = iframeRef.current?.contentWindow;
+    if (!win) return;
+
+    const prevId = prevSelectedSectionIdRef.current;
+    const nextId = selectedSectionId;
+
+    // Selection changed → clear the OLD section's override before
+    // sending anything for the new one.
+    if (prevId && prevId !== nextId) {
+      win.postMessage(
+        {
+          kind: "blaze:set-forced-progress",
+          sectionId: prevId,
+          progress: null,
+        },
+        "*"
+      );
+    }
+
+    if (nextId) {
+      win.postMessage(
+        {
+          kind: "blaze:set-forced-progress",
+          sectionId: nextId,
+          progress: scrubProgress,
+        },
+        "*"
+      );
+    }
+
+    prevSelectedSectionIdRef.current = nextId;
   }, [scrubProgress, selectedSectionId]);
 
   // Switching the selected section clears any prior scrub override so
@@ -804,8 +831,19 @@ function PlacementInspector({
                     onRemove={() => {
                       const next = frames.filter((_, j) => j !== i);
                       onSetKeyframes(next);
+                      // Keep the inspector pointed at a sane keyframe:
+                      // clear if we just removed the selected one, or
+                      // decrement if we removed something earlier in
+                      // the list so the selection still points at the
+                      // same logical keyframe after the shift
+                      // (Devin Review BUG_0002 on PR #11).
                       if (selectedKeyframeIndex === i) {
                         setSelectedKeyframeIndex(null);
+                      } else if (
+                        selectedKeyframeIndex !== null &&
+                        selectedKeyframeIndex > i
+                      ) {
+                        setSelectedKeyframeIndex(selectedKeyframeIndex - 1);
                       }
                     }}
                   />
