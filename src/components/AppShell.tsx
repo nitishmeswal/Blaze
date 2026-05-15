@@ -23,6 +23,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
+import { DeployButton } from "@/components/DeployButton";
 
 const TABS: { href: string; label: string; matchPrefix?: boolean }[] = [
   { href: "/build", label: "Chat" },
@@ -140,14 +141,7 @@ function TopBar({
         >
           Share
         </button>
-        <button
-          type="button"
-          disabled
-          title="Coming in Phase 4 — Deploy to Vercel"
-          className="rounded-md bg-blaze-text px-2.5 py-1 text-xs font-semibold text-blaze-bg hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Deploy
-        </button>
+        <DeployButton />
       </div>
     </header>
   );
