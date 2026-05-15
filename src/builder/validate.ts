@@ -68,5 +68,35 @@ function isSection(sec: unknown): boolean {
   if (s.props === null || typeof s.props !== "object" || Array.isArray(s.props)) {
     return false;
   }
+  // Optional background — if present, must be a recognised kind. We
+  // reject the whole section rather than silently dropping the field
+  // so the user sees the model's mistake in the chat error rather
+  // than a half-broken preview.
+  if (s.background !== undefined && !isSectionBackground(s.background)) {
+    return false;
+  }
+  return true;
+}
+
+function isSectionBackground(bg: unknown): boolean {
+  if (!bg || typeof bg !== "object" || Array.isArray(bg)) return false;
+  const b = bg as Record<string, unknown>;
+  if (b.kind !== "video") return false;
+  if (typeof b.url !== "string" || b.url.length === 0) return false;
+  // Optional fields — only reject if explicitly present with wrong type.
+  if (b.poster !== undefined && typeof b.poster !== "string") return false;
+  if (b.overlay !== undefined && typeof b.overlay !== "string") return false;
+  if (
+    b.opacity !== undefined &&
+    (typeof b.opacity !== "number" || Number.isNaN(b.opacity))
+  ) {
+    return false;
+  }
+  if (b.fit !== undefined && b.fit !== "cover" && b.fit !== "contain") {
+    return false;
+  }
+  if (b.loop !== undefined && typeof b.loop !== "boolean") return false;
+  if (b.muted !== undefined && typeof b.muted !== "boolean") return false;
+  if (b.autoplay !== undefined && typeof b.autoplay !== "boolean") return false;
   return true;
 }

@@ -70,6 +70,16 @@ export const DEMO_SITE_SPEC: SiteSpec = {
         ctaLabel: "Get started",
         ctaHref: "#features",
       },
+      background: {
+        kind: "video",
+        url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+        overlay: "rgba(10, 10, 10, 0.55)",
+        opacity: 1,
+        fit: "cover",
+        loop: true,
+        muted: true,
+        autoplay: true,
+      },
     },
     {
       id: "section-features",
