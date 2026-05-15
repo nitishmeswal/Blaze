@@ -4,11 +4,15 @@
  * SiteRenderer — walks a SiteSpec and mounts the matching kit
  * components in order. This is what lives inside the preview iframe.
  *
- * For Phase 1 we render purely DOM. Phase 3 will layer 3D placements
- * via R3F + CoordinateMapPlayer on top of each section.
+ * Phase 1 rendered DOM-only sections.
+ * Phase 3 layers a `<ThreeDLayer>` on top of any section whose spec
+ * has `section.threeD` set. The layer is absolutely-positioned over
+ * the section and has `pointer-events: none` so it never blocks the
+ * studio's overlay click handler.
  */
 import { useMemo } from "react";
 import { componentMap, isWired } from "@/builder/componentMap";
+import { ThreeDLayer } from "@/builder/components/ThreeDLayer";
 import type { SectionInvocation, SiteSpec } from "@/builder/types";
 
 export function SiteRenderer({ spec }: { spec: SiteSpec }) {
@@ -33,6 +37,7 @@ function SectionMount({ section }: { section: SectionInvocation }) {
   return (
     <section data-section-id={section.id} className="relative">
       <Comp {...section.props} />
+      {section.threeD ? <ThreeDLayer placement={section.threeD} /> : null}
     </section>
   );
 }
@@ -41,7 +46,7 @@ function UnwiredFallback({ section }: { section: SectionInvocation }) {
   return (
     <section
       data-section-id={section.id}
-      className="border-y border-dashed border-amber-500/40 bg-amber-500/5 p-8 text-amber-200"
+      className="relative border-y border-dashed border-amber-500/40 bg-amber-500/5 p-8 text-amber-200"
     >
       <p className="text-xs uppercase tracking-widest text-amber-400">
         Component not yet wired
@@ -52,6 +57,7 @@ function UnwiredFallback({ section }: { section: SectionInvocation }) {
         hasn&apos;t wired it yet. Add it to{" "}
         <code className="font-mono">src/builder/componentMap.ts</code>.
       </p>
+      {section.threeD ? <ThreeDLayer placement={section.threeD} /> : null}
     </section>
   );
 }
