@@ -13,6 +13,7 @@
 import { useMemo } from "react";
 import { componentMap, isWired } from "@/builder/componentMap";
 import { ThreeDLayer } from "@/builder/components/ThreeDLayer";
+import { BackgroundLayer } from "@/builder/components/BackgroundLayer";
 import type { SectionInvocation, SiteSpec } from "@/builder/types";
 
 /**
@@ -61,7 +62,12 @@ function SectionMount({
   const Comp = componentMap[section.componentId];
   return (
     <section data-section-id={section.id} className="relative">
-      <Comp {...section.props} />
+      {section.background ? (
+        <BackgroundLayer background={section.background} />
+      ) : null}
+      <div className="relative" style={{ zIndex: 1 }}>
+        <Comp {...section.props} />
+      </div>
       {section.threeD ? (
         <ThreeDLayer
           placement={section.threeD}

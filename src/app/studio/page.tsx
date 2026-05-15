@@ -35,6 +35,7 @@ import { isSiteSpec } from "@/builder/validate";
 import type {
   PlacementKeyframe,
   PlacementMotion,
+  SectionBackground,
   SectionInvocation,
   SiteSpec,
   ThreeDPlacement,
@@ -404,6 +405,21 @@ export default function StudioPage() {
     [updateSection]
   );
 
+  const setBackground = useCallback(
+    (id: string, background: SectionBackground | null) => {
+      updateSection(id, (s) => {
+        const next: SectionInvocation = { ...s };
+        if (background) {
+          next.background = background;
+        } else {
+          delete (next as { background?: unknown }).background;
+        }
+        return next;
+      });
+    },
+    [updateSection]
+  );
+
   const selectedSection = useMemo(
     () => spec.sections.find((s) => s.id === selectedSectionId) ?? null,
     [spec.sections, selectedSectionId]
@@ -413,18 +429,45 @@ export default function StudioPage() {
   // When the author drags the scrub slider, push a forced-progress
   // override to the iframe so the placement animates in place.
   // Clearing the override (scrubProgress=null) restores real scroll.
+  //
+  // We also track the previously-selected section id so that when the
+  // author switches sections we can explicitly clear that section's
+  // forced-progress in the iframe (otherwise it stays frozen at the
+  // last scrub value forever — see Devin Review BUG_0001 on PR #11).
+  const prevSelectedSectionIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!previewReady.current) return;
-    const id = selectedSectionId;
-    if (!id) return;
-    iframeRef.current?.contentWindow?.postMessage(
-      {
-        kind: "blaze:set-forced-progress",
-        sectionId: id,
-        progress: scrubProgress,
-      },
-      "*"
-    );
+    const win = iframeRef.current?.contentWindow;
+    if (!win) return;
+
+    const prevId = prevSelectedSectionIdRef.current;
+    const nextId = selectedSectionId;
+
+    // Selection changed → clear the OLD section's override before
+    // sending anything for the new one.
+    if (prevId && prevId !== nextId) {
+      win.postMessage(
+        {
+          kind: "blaze:set-forced-progress",
+          sectionId: prevId,
+          progress: null,
+        },
+        "*"
+      );
+    }
+
+    if (nextId) {
+      win.postMessage(
+        {
+          kind: "blaze:set-forced-progress",
+          sectionId: nextId,
+          progress: scrubProgress,
+        },
+        "*"
+      );
+    }
+
+    prevSelectedSectionIdRef.current = nextId;
   }, [scrubProgress, selectedSectionId]);
 
   // Switching the selected section clears any prior scrub override so
@@ -563,6 +606,13 @@ export default function StudioPage() {
               ) : null}
             </ul>
           </Panel>
+
+          {selectedSection ? (
+            <BackgroundInspector
+              section={selectedSection}
+              onChange={(bg) => setBackground(selectedSection.id, bg)}
+            />
+          ) : null}
 
           {selectedSection ? (
             <PlacementInspector
@@ -804,8 +854,19 @@ function PlacementInspector({
                     onRemove={() => {
                       const next = frames.filter((_, j) => j !== i);
                       onSetKeyframes(next);
+                      // Keep the inspector pointed at a sane keyframe:
+                      // clear if we just removed the selected one, or
+                      // decrement if we removed something earlier in
+                      // the list so the selection still points at the
+                      // same logical keyframe after the shift
+                      // (Devin Review BUG_0002 on PR #11).
                       if (selectedKeyframeIndex === i) {
                         setSelectedKeyframeIndex(null);
+                      } else if (
+                        selectedKeyframeIndex !== null &&
+                        selectedKeyframeIndex > i
+                      ) {
+                        setSelectedKeyframeIndex(selectedKeyframeIndex - 1);
                       }
                     }}
                   />
@@ -1305,5 +1366,199 @@ function PlusIcon(props: React.SVGProps<SVGSVGElement>) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
       <path d="M12 5v14M5 12h14" />
     </svg>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// BackgroundInspector
+// ─────────────────────────────────────────────────────────────────────
+
+const SAMPLE_VIDEOS: { label: string; url: string; poster?: string }[] = [
+  {
+    label: "Big Buck Bunny (open clip)",
+    url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+  },
+  {
+    label: "Sintel trailer (open clip)",
+    url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+  },
+  {
+    label: "Tears of Steel (open clip)",
+    url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+  },
+];
+
+function BackgroundInspector({
+  section,
+  onChange,
+}: {
+  section: SectionInvocation;
+  onChange: (bg: SectionBackground | null) => void;
+}) {
+  const bg = section.background ?? null;
+  const isVideo = bg?.kind === "video";
+
+  return (
+    <section className="border-t border-blaze-line bg-blaze-surface2/50 px-3 py-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-[10px] font-medium uppercase tracking-widest text-blaze-mutedDim">
+          Background · <span className="text-blaze-text">{section.id}</span>
+        </h2>
+        {isVideo ? (
+          <button
+            type="button"
+            onClick={() => onChange(null)}
+            className="rounded-md border border-blaze-line bg-transparent px-2 py-1 text-[10px] uppercase tracking-widest text-blaze-muted transition-colors hover:border-blaze-line2 hover:text-blaze-text"
+          >
+            clear
+          </button>
+        ) : null}
+      </div>
+
+      {!isVideo ? (
+        <div className="mt-2 flex flex-col gap-1.5">
+          <p className="text-xs text-blaze-muted">
+            No background. Add a video to give this section a cinematic
+            feel. Try one of these or paste your own URL.
+          </p>
+          <div className="flex flex-col gap-1">
+            {SAMPLE_VIDEOS.map((sample) => (
+              <button
+                key={sample.url}
+                type="button"
+                onClick={() =>
+                  onChange({
+                    kind: "video",
+                    url: sample.url,
+                    overlay: "rgba(10, 10, 10, 0.5)",
+                    opacity: 1,
+                    fit: "cover",
+                    loop: true,
+                    muted: true,
+                    autoplay: true,
+                  })
+                }
+                className="flex items-center justify-between rounded-md border border-blaze-line bg-blaze-bg/30 px-2 py-1.5 text-left text-xs text-blaze-text transition-colors hover:border-blaze-accent/40 hover:bg-blaze-accent/5"
+              >
+                <span>{sample.label}</span>
+                <span className="font-mono text-[10px] text-blaze-mutedDim">
+                  sample
+                </span>
+              </button>
+            ))}
+          </div>
+          <label className="mt-1 flex flex-col gap-1 text-xs">
+            <span className="text-blaze-muted">or paste a video URL</span>
+            <input
+              type="url"
+              placeholder="https://…/clip.mp4"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const v = (e.target as HTMLInputElement).value.trim();
+                  if (v) {
+                    onChange({
+                      kind: "video",
+                      url: v,
+                      overlay: "rgba(10, 10, 10, 0.5)",
+                      opacity: 1,
+                      fit: "cover",
+                      loop: true,
+                      muted: true,
+                      autoplay: true,
+                    });
+                    (e.target as HTMLInputElement).value = "";
+                  }
+                }
+              }}
+              className="rounded-md border border-blaze-line bg-blaze-bg px-2 py-1 text-xs"
+            />
+          </label>
+        </div>
+      ) : (
+        <div className="mt-2 flex flex-col gap-2 text-xs">
+          <label className="flex flex-col gap-1">
+            <span className="text-blaze-muted">video URL</span>
+            <input
+              type="url"
+              value={bg.url}
+              onChange={(e) => onChange({ ...bg, url: e.target.value })}
+              className="rounded-md border border-blaze-line bg-blaze-bg px-2 py-1 text-xs"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-blaze-muted">overlay (CSS color)</span>
+            <input
+              type="text"
+              value={bg.overlay ?? ""}
+              placeholder="rgba(10, 10, 10, 0.5)"
+              onChange={(e) =>
+                onChange({ ...bg, overlay: e.target.value || undefined })
+              }
+              className="rounded-md border border-blaze-line bg-blaze-bg px-2 py-1 font-mono text-[11px]"
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-blaze-muted">opacity</span>
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={bg.opacity ?? 1}
+                onChange={(e) =>
+                  onChange({ ...bg, opacity: Number(e.target.value) })
+                }
+                className="rounded-md border border-blaze-line bg-blaze-bg px-2 py-1 font-mono text-[11px]"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-blaze-muted">fit</span>
+              <select
+                value={bg.fit ?? "cover"}
+                onChange={(e) =>
+                  onChange({
+                    ...bg,
+                    fit: e.target.value as "cover" | "contain",
+                  })
+                }
+                className="rounded-md border border-blaze-line bg-blaze-bg px-2 py-1 text-xs"
+              >
+                <option value="cover">cover</option>
+                <option value="contain">contain</option>
+              </select>
+            </label>
+          </div>
+          <div className="flex items-center gap-3 pt-1 text-[11px]">
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={bg.loop ?? true}
+                onChange={(e) => onChange({ ...bg, loop: e.target.checked })}
+              />
+              <span className="text-blaze-muted">loop</span>
+            </label>
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={bg.muted ?? true}
+                onChange={(e) => onChange({ ...bg, muted: e.target.checked })}
+              />
+              <span className="text-blaze-muted">muted</span>
+            </label>
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={bg.autoplay ?? true}
+                onChange={(e) =>
+                  onChange({ ...bg, autoplay: e.target.checked })
+                }
+              />
+              <span className="text-blaze-muted">autoplay</span>
+            </label>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

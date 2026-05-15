@@ -37,6 +37,47 @@ export interface SectionInvocation {
    * positioned in the section's local coordinate space at runtime.
    */
   threeD?: ThreeDPlacement;
+  /**
+   * Optional cinematic background that fills the section while it is
+   * in the viewport. Today this is a video element (with optional
+   * tinted color grade); image / animated-gradient kinds can be added
+   * later without breaking the schema.
+   */
+  background?: SectionBackground;
+}
+
+/**
+ * Section-level background track. Sits behind the section content
+ * (z-index < 0) and fades on entry / exit so contiguous sections that
+ * share a vibe blend rather than hard-cutting.
+ */
+export type SectionBackground = SectionBackgroundVideo;
+
+export interface SectionBackgroundVideo {
+  kind: "video";
+  /** Direct .mp4 / .webm URL (CORS-friendly required). */
+  url: string;
+  /** Optional poster shown until the video has decoded a frame. */
+  poster?: string;
+  /** Looping playback (default true). */
+  loop?: boolean;
+  /** Muted (default true — autoplay needs this). */
+  muted?: boolean;
+  /** Autoplay when the section enters the viewport (default true). */
+  autoplay?: boolean;
+  /**
+   * Optional CSS color overlaid on top of the video to harmonise it
+   * with the section's text. Hex or rgba(). Defaults to a soft black
+   * scrim so foreground text stays legible.
+   */
+  overlay?: string;
+  /**
+   * 0..1 — how opaque the video is. Defaults to 1 (fully visible).
+   * Set lower to use the video as a textural wash behind a solid bg.
+   */
+  opacity?: number;
+  /** `object-fit` mode. Defaults to "cover". */
+  fit?: "cover" | "contain";
 }
 
 /**
