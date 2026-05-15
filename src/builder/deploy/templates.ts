@@ -215,9 +215,23 @@ export function readmeFor(spec: SiteSpec): string {
 }
 
 /**
- * Quote a JS-string-safe value (escape backslashes and quotes). Used
- * for inlining values into source-code templates.
+ * Quote a JS-string-safe value (escape backslashes, quotes, and the
+ * control characters that would otherwise terminate a double-quoted
+ * string literal). Used for inlining `SiteSpec.meta.title` into the
+ * generated layout.tsx — if a title contained a literal newline the
+ * generated file would have an unterminated string and the deploy
+ * (or zip) would fail to build.
  */
-function jsString(raw: string): string {
-  return raw.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+export function jsString(raw: string): string {
+  return raw
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r")
+    .replace(/\t/g, "\\t")
+    // Strip the other ASCII control codes entirely — they're never
+    // legitimately in a page title and dropping them is safer than
+    // trying to \u-escape them across all the surrounding contexts.
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
 }
