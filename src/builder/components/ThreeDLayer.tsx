@@ -44,6 +44,8 @@
 import {
   useRef,
   useEffect,
+  useState,
+  useMemo,
   type ReactNode,
 } from "react";
 import { Canvas as R3FCanvas, useFrame, useThree } from "@react-three/fiber";
@@ -51,9 +53,20 @@ import * as THREE from "three";
 import type { ThreeDPlacement } from "@/builder/types";
 import { Bubbles } from "@/kit/3d/Bubbles";
 import { GltfModel } from "@/kit/3d/GltfModel";
+import {
+  sampleMotion,
+  sectionScrollProgress,
+} from "@/builder/threeD/motion";
 
 export interface ThreeDLayerProps {
   placement: ThreeDPlacement;
+  /**
+   * Optional explicit scroll progress 0..1 used by the studio scrub
+   * slider to drive motion without actually scrolling the iframe.
+   * When undefined (the production path), the runtime derives the
+   * progress from the section's bounding rect every frame.
+   */
+  forcedProgress?: number;
 }
 
 /**
@@ -63,9 +76,19 @@ export interface ThreeDLayerProps {
  * `data-3d-layer` so the studio overlay can ignore these wrappers
  * when reading section rects.
  */
-export function ThreeDLayer({ placement }: ThreeDLayerProps) {
+export function ThreeDLayer({ placement, forcedProgress }: ThreeDLayerProps) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  // Subscribe to the parent section's scroll progress when motion is
+  // present. The hook returns null when there's no motion authored,
+  // letting the renderer fall back to the static anchor.
+  const progress = useSectionScrollProgress(
+    wrapperRef,
+    !!placement.motion,
+    forcedProgress
+  );
   return (
     <div
+      ref={wrapperRef}
       data-3d-layer
       className="pointer-events-none absolute inset-0 z-10"
       aria-hidden="true"
@@ -82,10 +105,59 @@ export function ThreeDLayer({ placement }: ThreeDLayerProps) {
         <PixelOrthoCamera />
         <ambientLight intensity={0.75} />
         <directionalLight position={[120, 200, 300]} intensity={1.1} />
-        <PlacementGroup placement={placement} />
+        <PlacementGroup placement={placement} progress={progress} />
       </R3FCanvas>
     </div>
   );
+}
+
+/**
+ * Track the wrapping section element's scroll progress (0..1) over
+ * the page. We attach a rAF loop only when motion is enabled — for
+ * static placements there's nothing to update so the loop is skipped.
+ *
+ * `forcedProgress` overrides the derived value when present (used by
+ * the studio's scrub slider).
+ */
+function useSectionScrollProgress(
+  wrapperRef: React.RefObject<HTMLDivElement | null>,
+  enabled: boolean,
+  forcedProgress?: number
+): number | null {
+  const [progress, setProgress] = useState<number | null>(
+    enabled ? 0 : null
+  );
+  useEffect(() => {
+    if (!enabled) {
+      setProgress(null);
+      return;
+    }
+    if (typeof window === "undefined") return;
+    let rafId = 0;
+    let last = -1;
+    function tick() {
+      const el = wrapperRef.current;
+      if (!el) {
+        rafId = window.requestAnimationFrame(tick);
+        return;
+      }
+      // The wrapper is `absolute inset-0` inside the section, so its
+      // rect equals the section's rect.
+      const r = el.getBoundingClientRect();
+      const next = sectionScrollProgress(r.top, r.height, window.innerHeight);
+      if (Math.abs(next - last) > 0.0005) {
+        last = next;
+        setProgress(next);
+      }
+      rafId = window.requestAnimationFrame(tick);
+    }
+    rafId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(rafId);
+  }, [enabled, wrapperRef]);
+
+  // forcedProgress wins when defined — used by the studio scrub UI.
+  if (forcedProgress !== undefined) return forcedProgress;
+  return progress;
 }
 
 /**
@@ -132,14 +204,64 @@ function PixelOrthoCamera() {
 }
 
 /**
- * Position the placement group at the placement's section-pixel
- * anchor. Because the camera is ortho with top-left origin, the only
- * transformation needed is a sign flip on Y.
+ * Position the placement group at the placement's current pose.
+ *
+ * - If `placement.motion` has keyframes AND `progress` is non-null,
+ *   the group's position / scale / rotation is sampled from the
+ *   motion path (see `sampleMotion`).
+ * - Otherwise the group sits at the static `placement.anchor`.
+ *
+ * Because the camera is ortho with top-left origin, the only
+ * transformation we have to do on the position is a sign flip on Y.
+ * Scale and rotation pass straight through.
  */
-function PlacementGroup({ placement }: { placement: ThreeDPlacement }) {
+function PlacementGroup({
+  placement,
+  progress,
+}: {
+  placement: ThreeDPlacement;
+  progress: number | null;
+}) {
+  const groupRef = useRef<THREE.Group>(null);
   const anchor = placement.anchor ?? { x: 0, y: 0, z: 0 };
+
+  // Pre-sort keyframes once per change so the per-frame sampler can
+  // skip the sort if we end up calling it from useFrame later.
+  const motion = placement.motion;
+  const sortedFrames = useMemo(
+    () =>
+      motion && motion.keyframes.length > 0
+        ? [...motion.keyframes].sort((a, b) => a.t - b.t)
+        : null,
+    [motion]
+  );
+
+  // Apply the pose. We do it inside useFrame so motion stays smooth
+  // across React state updates (avoids re-rendering the whole tree
+  // every animation frame).
+  useFrame(() => {
+    const g = groupRef.current;
+    if (!g) return;
+    if (sortedFrames && progress !== null) {
+      const pose = sampleMotion(
+        { keyframes: sortedFrames },
+        progress
+      );
+      if (pose) {
+        g.position.set(pose.x, -pose.y, pose.z);
+        g.scale.setScalar(pose.scale);
+        g.rotation.z = pose.rotation;
+        return;
+      }
+    }
+    // Fallback: static anchor.
+    g.position.set(anchor.x, -anchor.y, anchor.z);
+    g.scale.setScalar(1);
+    g.rotation.z = 0;
+  });
+
   return (
-    <group position={[anchor.x, -anchor.y, anchor.z]}>
+    <group ref={groupRef} position={[anchor.x, -anchor.y, anchor.z]}>
       {renderPlacement(placement)}
     </group>
   );

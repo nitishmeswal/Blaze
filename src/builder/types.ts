@@ -40,9 +40,11 @@ export interface SectionInvocation {
 }
 
 /**
- * A 3D model layered onto a section. The CoordinateMap drives motion as
- * the section scrolls past. Position is anchored to the section so the
- * author can move the section without re-authoring the motion.
+ * A 3D model layered onto a section. Motion is authored in the studio
+ * as a list of keyframes mapped to the section's scroll progress
+ * (0..1 as the section travels through the viewport). Position is
+ * anchored to the section so the author can move the section without
+ * re-authoring the motion.
  */
 export interface ThreeDPlacement {
   /** Which model to mount — either a kit primitive or a glTF URL. */
@@ -50,17 +52,83 @@ export interface ThreeDPlacement {
     | { kind: "kit"; componentId: string; props?: Record<string, unknown> }
     | { kind: "gltf"; url: string };
   /**
-   * Scroll-driven motion authored in the planner. Optional — without
-   * one, the model just sits at the placement's anchor.
+   * Heavyweight whole-page motion (the original /planner output).
+   * Kept for backward-compat / the standalone planner; new authoring
+   * goes through the lighter-weight `motion` field below.
    */
   coordinateMap?: CoordinateMap;
   /**
+   * Section-local scroll-driven motion authored in /studio. When
+   * present and the section has at least two keyframes, the runtime
+   * interpolates position / scale / rotation against the section's
+   * scroll progress (0 at entry, 1 at exit) and falls back to
+   * `anchor` outside the keyframe range.
+   */
+  motion?: PlacementMotion;
+  /**
    * Default static anchor in the section's local CSS coords (px from
-   * top-left). Used when there's no CoordinateMap or before the path's
-   * first waypoint.
+   * top-left). Used when there's no `motion`, or before the first
+   * keyframe / after the last keyframe.
    */
   anchor?: { x: number; y: number; z: number };
 }
+
+/**
+ * Section-local scroll-driven motion: an ordered list of keyframes
+ * indexed by `t` (0..1) where 0 is "section top hits viewport bottom"
+ * and 1 is "section bottom hits viewport top". The runtime clamps
+ * inputs into this range so motion never overshoots.
+ */
+export interface PlacementMotion {
+  /** Ordered keyframes (sorted by `t` ascending at render time). */
+  keyframes: PlacementKeyframe[];
+}
+
+/**
+ * One stop on a placement's motion path.
+ *
+ * Coords are in **section-pixel space** (the same space as
+ * `ThreeDPlacement.anchor`) so the orthographic camera in
+ * `<ThreeDLayer>` can map them 1:1 onto the rendered page.
+ */
+export interface PlacementKeyframe {
+  /** Section scroll progress 0..1. */
+  t: number;
+  /** Section-local pixel X. */
+  x: number;
+  /** Section-local pixel Y. */
+  y: number;
+  /** Optional depth offset (z-order in ortho space; default 0). */
+  z?: number;
+  /** Scale multiplier (default 1). */
+  scale?: number;
+  /** Rotation in radians around the screen-Z axis (default 0). */
+  rotation?: number;
+  /**
+   * Easing used when interpolating *to* this keyframe from the
+   * previous one. Defaults to "power2.inOut" — a tasteful generic.
+   */
+  easing?: PlacementEasing;
+}
+
+/** A small curated subset of easing curves we ship with the runtime. */
+export type PlacementEasing =
+  | "linear"
+  | "power1.in"
+  | "power1.out"
+  | "power1.inOut"
+  | "power2.in"
+  | "power2.out"
+  | "power2.inOut"
+  | "power3.in"
+  | "power3.out"
+  | "power3.inOut"
+  | "expo.in"
+  | "expo.out"
+  | "expo.inOut"
+  | "sine.in"
+  | "sine.out"
+  | "sine.inOut";
 
 /**
  * Site-level metadata. Drives <head> tags, the layout shell, and
