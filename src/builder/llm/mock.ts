@@ -17,6 +17,7 @@ import type {
   CompletionParams,
   CompletionResult,
   LLMProvider,
+  StreamEvent,
 } from "./types";
 
 export class MockProvider implements LLMProvider {
@@ -35,6 +36,40 @@ export class MockProvider implements LLMProvider {
     };
     return {
       content: JSON.stringify(payload),
+      model: this.model,
+      latencyMs: Date.now() - started,
+    };
+  }
+
+  /**
+   * Stream the deterministic payload in small chunks so the UI's
+   * streaming code path is exercised in dev without a real model.
+   * 30 char chunks @ 20ms apart → ~50 chars/s, slow enough to see
+   * the text crawl in.
+   */
+  async *stream(params: CompletionParams): AsyncIterable<StreamEvent> {
+    const started = Date.now();
+    const lastUser =
+      [...params.messages].reverse().find((m) => m.role === "user")?.content ??
+      "";
+    const action = pickAction(lastUser);
+    const content = JSON.stringify({
+      explanation: action.explanation,
+      spec: action.spec,
+    });
+
+    const CHUNK = 30;
+    for (let i = 0; i < content.length; i += CHUNK) {
+      const slice = content.slice(i, i + CHUNK);
+      yield { type: "delta", content: slice };
+      // Yield to the event loop so the SSE flush actually reaches the
+      // client between chunks.
+      await new Promise<void>((r) => setTimeout(r, 20));
+    }
+
+    yield {
+      type: "done",
+      content,
       model: this.model,
       latencyMs: Date.now() - started,
     };

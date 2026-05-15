@@ -33,7 +33,26 @@ export interface CompletionResult {
   model: string;
   /** Wall-clock ms the request took. Useful for the chat UI's spinner copy. */
   latencyMs: number;
+  /** Token usage when the provider reports it. */
+  usage?: { promptTokens: number; completionTokens: number };
 }
+
+/**
+ * Streaming event surfaced to the route + UI.
+ *  - `delta`: a chunk of completion content (model id and seq fixed once known)
+ *  - `done`:  final event, includes the assembled full content + usage + latency
+ *  - `error`: terminal error event, no further events follow
+ */
+export type StreamEvent =
+  | { type: "delta"; content: string }
+  | {
+      type: "done";
+      content: string;
+      model: string;
+      latencyMs: number;
+      usage?: { promptTokens: number; completionTokens: number };
+    }
+  | { type: "error"; message: string };
 
 export interface LLMProvider {
   /** Stable identifier, e.g. `"ollama"`, `"anthropic"`, `"openai"`. */
@@ -41,4 +60,10 @@ export interface LLMProvider {
   /** Model id as understood by the provider. */
   readonly model: string;
   complete(params: CompletionParams): Promise<CompletionResult>;
+  /**
+   * Optional streaming variant. Yields a sequence of StreamEvents.
+   * Providers without streaming support omit this; callers fall
+   * back to `complete()` and wrap the result as a single "done".
+   */
+  stream?(params: CompletionParams): AsyncIterable<StreamEvent>;
 }
