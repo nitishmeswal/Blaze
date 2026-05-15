@@ -131,6 +131,13 @@ export class GroqProvider implements LLMProvider {
    * JSON chunk with `choices[0].delta.content` carrying the next slice
    * of the assistant message. The terminal sentinel is `data: [DONE]`.
    * We surface a `done` event with the assembled text + usage at the end.
+   *
+   * IMPORTANT: Groq's `response_format: json_object` + streaming combo
+   * batches the whole response into a single delta (the server validates
+   * JSON before emitting). To keep token-by-token UX we deliberately
+   * SKIP json mode here and rely on the system prompt to constrain
+   * the output shape. The downstream parser still strips fenced output
+   * for safety.
    */
   async *stream(params: CompletionParams): AsyncIterable<StreamEvent> {
     const body: OpenAIChatRequest = {
@@ -141,7 +148,6 @@ export class GroqProvider implements LLMProvider {
       })),
       temperature: params.temperature ?? 0.2,
       ...(params.maxTokens ? { max_tokens: params.maxTokens } : {}),
-      ...(params.json ? { response_format: { type: "json_object" as const } } : {}),
       stream: true,
       stream_options: { include_usage: true },
     };
